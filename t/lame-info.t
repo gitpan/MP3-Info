@@ -60,6 +60,8 @@ if ( ! -e $file && (-e catfile($tdir, $file)) ) {
 	$dir  = catdir($tdir, $dir);
 }
 
+exit if ! -e $file;  # hrm
+
 mkpath $dir;
 
 { # define MP3s to create

@@ -1,3 +1,29 @@
+* v1.10, day, December 27, 2004
+
+   Make utf8 enabled by default (if available).
+
+   perl 5.6 is now required.
+
+   Remove dependency on Symbol.pm.
+
+   Use three-arg open.  (Alex Marandon)
+
+   Make reading of genres a bit more nimble.  (Brian S. Stephan)
+
+   Fix frame counting.  (Ben Winslow, Anthony DiSante)
+
+   Fix syncsafe byte reading.  (Pierre-Yves Thoulon, et al)
+
+   Some Unicode fixes.  (Ilya Konstantinov)
+
+   More changes for Unicode.  Unicode::String no longer used; Encode is used
+   instead.  Encode::Guess used as last resort.  (Dan Sully)
+
+   Optimizations and other fixes.  (michael, Dan Sully)
+
+   Support for reading ID3v2 tags from WAV and AIFF files.  Not fully
+   supported.  (Dan Sully)
+
 * v1.02, Sunday, March 2, 2003
 
    Fix broken argument parsing for use_mp3_utf8.  (Ben Gertzfield)
@@ -6,7 +32,7 @@
 
    Better document for new() method.
 
-   Add can() method. (Ken Williams)
+   Add can() method.  (Ken Williams)
 
    Stick failure warnings in $@.  (Jeffrey Friedl)
 
@@ -16,7 +42,7 @@
    Deal with broken iTunes comment frames in ID3v2.3.0/2.4.0.  (Many users)
 
    remove_mp3tag() was reporting 128 bytes removed even if no bytes were
-   removed.  (scfc_de @ SF.net)
+   removed.  (scfc_de)
 
    Allow calling methods on objects where tag does not exist (e.g., don't fail
    if there is no comment but you call $mp3->comment).
@@ -37,7 +63,7 @@
    guess at which comment to use if there's more than one.
 
    Add some support for ID3v2.4.0 and Unicode strings in tags; see 
-   use_mp3_utf8. (Ben Gertzfield)
+   use_mp3_utf8.  (Ben Gertzfield)
 
    Add TAGVERSION to get_mp3tag result.
 
@@ -52,7 +78,7 @@
 
 * v0.91, Saturday, February 10, 2001
 
-   Fix dumb bug with /o. (David Reuteler)
+   Fix dumb bug with /o.  (David Reuteler)
 
    Fix bug where get_mp3tag() would return an empty hashref instead of
    undef if ID3v1 tag is asked for, and there is no ID3v1 tag, but there is
@@ -86,11 +112,11 @@
 
    Add in some additional genres.  (Peter Marschall)
 
-   Added ID3v2 tag removal. (Ronan Waide)  NOTE: this is DANGEROUS.  It is
+   Added ID3v2 tag removal.  (Ronan Waide)  NOTE: this is DANGEROUS.  It is
    tested, but needs more testing.  The file is rewritten entirely.  Lots
    of data moving around.
 
-   Added ID3v2.2.0 tag reading. (Ronan Waide, Kee Hinckley)
+   Added ID3v2.2.0 tag reading.  (Ronan Waide, Kee Hinckley)
 
    Changed ID3v2 tag recognition to only match [A-Z0-9] instead of \w.
    (Christoph Oberauer)
@@ -141,11 +167,11 @@
 
 * v0.63, Friday, April 30, 1999
 
-   Added ID3v1.1 support. (Trond Michelsen, Pass F. B. Travis)
+   Added ID3v1.1 support.  (Trond Michelsen, Pass F. B. Travis)
 
-   Added 255 (\xFF) as default genre. (Andrew Phillips)
+   Added 255 (\xFF) as default genre.  (Andrew Phillips)
 
-   I think I fixed bug relating to spaces in ID3v2 headers. (Tom Brown)
+   I think I fixed bug relating to spaces in ID3v2 headers.  (Tom Brown)
 
 
 * v0.62, Sunday, March 7, 1999
@@ -196,7 +222,7 @@
    correctly.
 
    Export all genre data structures on request.  Added use_winamp_genres()
-   to use WinAmp genres. (Roland Steinbach)
+   to use WinAmp genres.  (Roland Steinbach)
 
    Added a $MPEG::MP3Info::try_harder ($MP3::Info::try_harder)
    variable that will try harder to find the MP3 header in a file.  False

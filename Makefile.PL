@@ -9,4 +9,5 @@ WriteMakefile(
 	'clean'		=> {
 		'FILES'		=> 'MP3-Info-*'
 	},
+	'NO_META'		=> 1,
 );
