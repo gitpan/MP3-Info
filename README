@@ -1,7 +1,8 @@
-Sunday, January 14, 2001
+Saturday, February 10, 2001
 
-This is MP3::Info.  A lot of little fixes to this version, nothing too
-major (see the change log below and in the POD).
+This is MP3::Info.  Two small bugfixes: one with proper return value
+for get_mp3tag() special case, and one small, but possibly significant,
+fix with /o.
 
 A wrapper module is included so scripts calling MPEG::MP3Info (the
 old name) will still work.
@@ -184,6 +185,13 @@ TODO
         Test suite could use a bit of an overhaul and update.
 
 HISTORY
+    v0.91, Saturday, February 10, 2001
+        Fix dumb bug with /o. (David Reuteler)
+
+        Fix bug where C<get_mp3tag> would return an empty hashref instead
+        of undef if ID3v1 tag is asked for, and there is no ID3v1 tag, but
+        there is an ID3v2 tag.  (Stuart)
+
     v0.90, Sunday, January 14, 2001
         Added experimental OOP support for getting and setting data; doesn't
         work for removing tags.
@@ -404,6 +412,6 @@ SEE ALSO
                 http://www.xmms.org/
 
 VERSION
-    v0.90, Sunday, January 14, 2001
+    v0.91, Saturday, February 10, 2001
 
 #============================================================================

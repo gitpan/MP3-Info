@@ -19,9 +19,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.10 2001/01/14 20:47:04 pudge Exp $
-($REVISION) = ' $Revision: 1.10 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '0.90';
+# $Id: Info.pm,v 1.12 2001/02/10 16:32:43 pudge Exp $
+($REVISION) = ' $Revision: 1.12 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '0.91';
 
 =pod
 
@@ -69,7 +69,7 @@ MP3::Info - Manipulate / fetch info from MP3 audio files
 sub new {
 	my($pack, $file) = @_;
 
-	my $info = get_mp3info($file) or return;
+	my $info = get_mp3info($file) or return undef;
 	my $tags = get_mp3tag($file) || { map { ($_ => undef) } @v1_tag_names };
 	my %self = (
 		FILE		=> $file,
@@ -133,7 +133,7 @@ You can import the data structures with one of:
 sub use_winamp_genres {
 	%mp3_genres = %winamp_genres;
 	@mp3_genres = @winamp_genres;
-	1;
+	return 1;
 }
 
 =pod
@@ -166,6 +166,7 @@ sub remove_mp3tag {
 	carp('No file specified'), return undef
 		unless defined $file && $file ne '';
 
+	return undef unless -s $file;
 	if (ref $file) { # filehandle passed
 		$fh = $file;
 	} else {
@@ -206,9 +207,7 @@ sub remove_mp3tag {
 		}
 	}
 
-	unless (ref $file) { # filehandle not passed
-		close $fh or carp "Problem closing '$file': $!";
-	}
+	_close($file, $fh);
 
 	return $return || -1;
 }
@@ -300,7 +299,7 @@ EOT
 		}
 	}
 
-
+	return unless -s $file;
 	if (ref $file) { # filehandle passed
 		$fh = $file;
 	} else {
@@ -328,11 +327,9 @@ EOT
 
 	select $oldfh;
 
-	unless (ref $file) { # filehandle not passed
-		close $fh or carp "Problem closing '$file': $!";
-	}
+	_close($file, $fh);
 
-	1;
+	return 1;
 }
 
 =pod
@@ -368,15 +365,16 @@ are in the global hash (not exported) C<%v2_tag_names>.
 sub get_mp3tag {
 	my($file, $ver, $raw_v2) = @_;
 	my($tag, $v1, $v2, %info, @array, $fh);
-	$ver ||= 0;
+	$ver = !$ver ? 0 : ($ver == 2 || $ver == 1) ? $ver : 0;
 
-	carp('No file specified'), return unless defined $file && $file ne '';
+	carp('No file specified'), return undef unless defined $file && $file ne '';
 
+	return undef unless -s $file;
 	if (ref $file) { # filehandle passed
 		$fh = $file;
 	} else {
 		$fh = gensym;
-		open $fh, "< $file\0" or return;
+		open $fh, "< $file\0" or return undef;
 	}
 
 	binmode $fh;
@@ -397,11 +395,17 @@ sub get_mp3tag {
 					(unpack('a3a30a30a30a4a30', $tag),
 					$mp3_genres[ord(substr $tag, -1)]);
 			}
+		} elsif ($ver == 1) {
+			_close($file, $fh);
+			return undef;
 		}
 	}
 
 	$v2 = _get_v2tag($fh);
-	return unless $v1 || $v2;
+	unless ($v1 || $v2) {
+		_close($file, $fh);
+		return undef;
+	}
 
 	if (($ver == 0 || $ver == 2) && $v2) {
 		if ($raw_v2) {
@@ -426,13 +430,13 @@ sub get_mp3tag {
 		}
 	}
 
-	$info{GENRE} = '' unless defined $info{GENRE};
-
-	unless (ref $file) { # filehandle not passed
-		close $fh or carp "Problem closing '$file': $!";
+	if (keys %info && ! defined $info{GENRE}) {
+		$info{GENRE} = '';
 	}
 
-	return {%info};
+	_close($file, $fh);
+
+	return keys %info ? {%info} : undef;
 }
 
 sub _get_v2tag {
@@ -458,7 +462,7 @@ sub _get_v2tag {
 	$myseek = sub {
 		seek $fh, $off, 0;
 		read $fh, my($bytes), $hlen;
-		return unless $bytes =~ /^([A-Z0-9]{$num})/o;
+		return unless $bytes =~ /^([A-Z0-9]{$num})/;
 		my($id, $size) = ($1, $hlen);
 		my @bytes = reverse unpack "C$num", substr($bytes, $num, $num);
 		for my $i (0 .. ($num - 1)) {
@@ -528,7 +532,15 @@ sub get_mp3info {
 	my($file) = @_;
 	my($off, $myseek, $byte, $eof, $h, $tot, $fh);
 
-	carp('No file specified'), return unless defined $file && $file ne '';
+	carp('No file specified'), return undef unless defined $file && $file ne '';
+
+	return undef unless -s $file;
+	if (ref $file) { # filehandle passed
+		$fh = $file;
+	} else {
+		$fh = gensym;
+		open $fh, "< $file\0" or return undef;
+	}
 
 	$off = 0;
 	$tot = 4096;
@@ -537,13 +549,6 @@ sub get_mp3info {
 		seek $fh, $off, 0;
 		read $fh, $byte, 4;
 	};
-
-	if (ref $file) { # filehandle passed
-		$fh = $file;
-	} else {
-		$fh = gensym;
-		open $fh, "< $file\0" or return;
-	}
 
 	binmode $fh;
 	&$myseek;
@@ -560,7 +565,10 @@ sub get_mp3info {
 		$off++;
 		&$myseek;
 		$h = _get_head($byte);
-		return if $off > $tot && !$try_harder;
+		if ($off > $tot && !$try_harder) {
+			_close($file, $fh);
+			return undef;
+		}
 	}
 
 	my $vbr = _get_vbr($fh, $h, \$off);
@@ -570,9 +578,7 @@ sub get_mp3info {
 	seek $fh, -128, 2;
 	$off += 128 if <$fh> =~ /^TAG/ ? 1 : 0;
 
-	unless (ref $file) { # filehandle not passed
-		close $fh or carp "Problem closing '$file': $!";
-	}
+	_close($file, $fh);
 
 	$h->{size} = $eof - $off;
 
@@ -604,7 +610,7 @@ sub _get_info {
 	if ($vbr) {
 		$i->{VBR_SCALE}	= $vbr->{scale} if $vbr->{scale};
 		$h->{bitrate}	= $i->{SIZE} / $i->{FRAMES} * $mfs;
-		return unless $h->{bitrate};
+		return undef unless $h->{bitrate};
 	}
 
 	$h->{'length'}	= ($i->{SIZE} * 8) / $h->{bitrate} / 10;
@@ -645,7 +651,7 @@ sub _get_head {
 }
 
 sub _is_mp3 {
-	my $h = $_[0] or return;
+	my $h = $_[0] or return undef;
 	return ! (	# all below must be false
 		 $h->{bitrate_index} == 0
 			||
@@ -784,6 +790,12 @@ sub _unpack_head {
 	unpack('l', pack('L', unpack('N', $_[0])));
 }
 
+sub _close {
+	my($file, $fh) = @_;
+	unless (ref $file) { # filehandle not passed
+		close $fh or carp "Problem closing '$file': $!";
+	}
+}
 
 BEGIN {
 	@mp3_genres = (
@@ -1190,6 +1202,15 @@ Test suite could use a bit of an overhaul and update.
 
 =over 4
 
+=item v0.91, Saturday, February 10, 2001
+
+Fix dumb bug with /o. (David Reuteler)
+
+Fix bug where C<get_mp3tag> would return an empty hashref instead
+of undef if ID3v1 tag is asked for, and there is no ID3v1 tag, but
+there is an ID3v2 tag.  (Stuart)
+
+
 =item v0.90, Sunday, January 14, 2001
 
 Added experimental OOP support for getting and setting data;
@@ -1407,10 +1428,12 @@ Trond Michelsen E<lt>mike@crusaders.noE<gt>,
 Dave O'Neill E<lt>dave@nexus.carleton.caE<gt>,
 Christoph Oberauer E<lt>christoph.oberauer@sbg.ac.atE<gt>,
 Andrew Phillips E<lt>asp@wasteland.orgE<gt>,
+David Reuteler E<lt>reuteler@visi.comE<gt>,
 Matthew Sachs E<lt>matthewg@zevils.comE<gt>,
 Hermann Schwaerzler E<lt>Hermann.Schwaerzler@uibk.ac.atE<gt>,
 Chris Sidi E<lt>sidi@angband.orgE<gt>,
 Roland Steinbach E<lt>roland@support-system.comE<gt>,
+Stuart E<lt>schneis@users.sourceforge.netE<gt>,
 Jeffery Sumler E<lt>jsumler@mediaone.netE<gt>,
 Predrag Supurovic E<lt>mpgtools@dv.co.yuE<gt>,
 Bogdan Surdu E<lt>tim@go.roE<gt>,
@@ -1473,6 +1496,6 @@ of the Artistic License, distributed with Perl.
 
 =head1 VERSION
 
-v0.90, Sunday, January 14, 2001
+v0.91, Saturday, February 10, 2001
 
 =cut
