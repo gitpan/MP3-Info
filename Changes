@@ -1,3 +1,7 @@
+* v1.13, Wednesday, March 10, 2005
+
+   Fix for UTF-16 handling.  (Wes Barris)
+
 * v1.12, Wednesday, March 9, 2005
 
    Add OFFSET to info.  (Dan Sully)

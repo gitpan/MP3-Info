@@ -24,9 +24,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.18 2005/03/10 00:16:49 pudge Exp $
-($REVISION) = ' $Revision: 1.18 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.12';
+# $Id: Info.pm,v 1.19 2005/03/11 04:41:29 pudge Exp $
+($REVISION) = ' $Revision: 1.19 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '1.13';
 
 =pod
 
@@ -570,9 +570,12 @@ sub get_mp3tag {
 								# Encode dies on a bad BOM, so it is
 								# probably wise to wrap it in an eval
 								# anyway
-								$data = join "\000", map {
-									eval { Encode::decode('utf16', $_) } || Encode::decode('utf16le', $_)
-								} split /\000\000/, $data;
+								$data = eval { Encode::decode('utf16', $data) } || Encode::decode('utf16le', $data);
+								# this split we do doesn't work, because obviously
+								# two NULLs can appear where we don't want ...
+								#$data = join "\000", map {
+								#	eval { Encode::decode('utf16', $_) } || Encode::decode('utf16le', $_)
+								#} split /\000\000/, $data;
 
 							} elsif ($encoding eq "\003") { # UTF-8
 								# make sure string is UTF8, and set flag appropriately
