@@ -24,9 +24,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.17 2005/01/15 02:19:39 pudge Exp $
-($REVISION) = ' $Revision: 1.17 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.11';
+# $Id: Info.pm,v 1.18 2005/03/10 00:16:49 pudge Exp $
+($REVISION) = ' $Revision: 1.18 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '1.12';
 
 =pod
 
@@ -782,6 +782,7 @@ This data cannot be changed.  Returned data:
 	BITRATE		bitrate in kbps (average for VBR files)
 	FREQUENCY	frequency in kHz
 	SIZE		bytes in audio stream
+	OFFSET		bytes offset that stream begins
 
 	SECS		total seconds
 	MM		minutes
@@ -861,11 +862,12 @@ sub get_mp3info {
 	seek $fh, 0, 2;
 	$eof = tell $fh;
 	seek $fh, -128, 2;
-	$off += 128 if <$fh> =~ /^TAG/ ? 1 : 0;
+	$eof -= 128 if <$fh> =~ /^TAG/ ? 1 : 0;
 
 	_close($file, $fh);
 
 	$h->{size} = $eof - $off;
+	$h->{offset} = $off;
 
 	return _get_info($h, $vbr);
 }
@@ -885,6 +887,7 @@ sub _get_info {
 	$i->{MODE}	= $h->{mode};
 
 	$i->{SIZE}	= $vbr && $vbr->{bytes} ? $vbr->{bytes} : $h->{size};
+	$i->{OFFSET}	= $h->{offset};
 
 	my $mfs		= $h->{fs} / ($h->{ID} ? 144000 : 72000);
 	$i->{FRAMES}	= int($vbr && $vbr->{frames}
@@ -1310,6 +1313,7 @@ BEGIN {
 		BITRATE
 		FREQUENCY
 		SIZE
+		OFFSET
 		SECS
 		MM
 		SS

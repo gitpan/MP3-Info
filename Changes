@@ -1,3 +1,7 @@
+* v1.12, Wednesday, March 9, 2005
+
+   Add OFFSET to info.  (Dan Sully)
+
 * v1.11, Friday, January 14, 2005
 
    Fix for ID3v2 tags that happen to be UTF-16LE.  (Dan Sully)
