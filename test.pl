@@ -10,7 +10,7 @@
 BEGIN { $| = 1; print "1..91\n"; }
 END {print "not ok 1\n" unless $loaded;}
 use strict;
-use MP3::Info;
+use MP3::Info 0.90;
 use File::Copy;
 use vars qw/$loaded/;
 $loaded = 1;

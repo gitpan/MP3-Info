@@ -32,7 +32,7 @@ print OUT <<'!NO!SUBS!';
 # the original author disclaims all responsibility for this
 # program.  mail about it will be IGNORED. - wmw 19990226
 # 
-# $Id: mp3tocddb,v 1.2 1999/02/26 02:11:13 mengwong Exp $
+# $Id: mp3tocddb.PL,v 1.2 2000/07/08 19:49:06 pudge Exp $
 # 
 # usage: mp3tocddb [-askcddb] [-textamp] [-dir=~/playlists] u2-achtung_baby*.mp3
 # 
@@ -52,7 +52,7 @@ use vars qw($VERSION $debug $askcddb $textamp $dir);
 use MP3::Info;
 use CDDB;
 
-($VERSION) = q$Id: mp3tocddb,v 1.2 1999/02/26 02:11:13 mengwong Exp $ =~ /([\d.]{3,})/;
+($VERSION) = q$Id: mp3tocddb.PL,v 1.2 2000/07/08 19:49:06 pudge Exp $ =~ /([\d.]{3,})/;
 
 $dir =~ s/~/$ENV{'HOME'}/ if (defined($dir));
 
