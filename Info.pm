@@ -19,9 +19,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.12 2001/02/10 16:32:43 pudge Exp $
-($REVISION) = ' $Revision: 1.12 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '0.91';
+# $Id: Info.pm,v 1.13 2002/01/23 04:36:43 pudge Exp $
+($REVISION) = ' $Revision: 1.13 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '1.00';
 
 =pod
 
@@ -416,7 +416,10 @@ sub get_mp3tag {
 					if ($_ eq 'TCON' && $v2->{$_} =~ /^\((\d+)\)/) {
 						$info{$v2_to_v1_names{$_}} = $mp3_genres[$1];
 					} else {
-						$info{$v2_to_v1_names{$_}} = $v2->{$_};
+						my $data = $v2->{$_};
+						$data = $data->[0] if ref $data;
+						$data =~ s/^.*\000//; # strip up to last null
+						$info{$v2_to_v1_names{$_}} = $data;
 					}
 				}
 			}
@@ -466,8 +469,6 @@ sub _get_v2tag {
 		my($id, $size) = ($1, $hlen);
 		my @bytes = reverse unpack "C$num", substr($bytes, $num, $num);
 		for my $i (0 .. ($num - 1)) {
-			# should be 128, or 256?  256 seems to work
-			# in practice where 128 breaks ... ?
 			$size += $bytes[$i] * 256 ** $i;
 		}
 		return($id, $size);
@@ -479,7 +480,6 @@ sub _get_v2tag {
 		my($id, $size) = &$myseek or last;
 		seek $fh, $off + $hlen, 0;
 		read $fh, my($bytes), $size - $hlen;
-		$bytes =~ s/\000//g;  # necessary?
 		if (exists $h->{$id}) {
 			if (ref $h->{$id} eq 'ARRAY') {
 				push @{$h->{$id}}, $bytes;
@@ -623,7 +623,8 @@ sub _get_info {
 	$i->{TIME}	= sprintf "%.2d:%.2d", @{$i}{'MM', 'SS'};
 
 	$i->{BITRATE}		= int $h->{bitrate};
-	$i->{FRAME_LENGTH}	= int($h->{size} / $i->{FRAMES});
+	# should we just return if ! FRAMES?
+	$i->{FRAME_LENGTH}	= int($h->{size} / $i->{FRAMES}) if $i->{FRAMES};
 	$i->{FREQUENCY}		= $frequency_tbl[3 * $h->{IDR} + $h->{sampling_freq}];
 
 	return $i;
@@ -1157,7 +1158,7 @@ can get the file, with a detailed description of the problem.
 
 If I download the file, after debugging the problem I will not keep the
 MP3 file if it is not legal for me to have it.  Just let me know if
-it is legal for me ot keep it or not.
+it is legal for me to keep it or not.
 
 
 =head1 TODO
@@ -1195,12 +1196,24 @@ I don't really have the time right now.  Patches welcome!  :-)
 
 Test suite could use a bit of an overhaul and update.
 
+=item Other VBR
+
+Right now, only Xing VBR is supported.
+
 =back
 
 
 =head1 HISTORY
 
 =over 4
+
+=item v1.00, Tuesday, January 22, 2002
+
+Get more reasonable data out of ID3v2 tags by stripping up to
+last null in tag.
+
+Don't get FRAME_LENGTH if no FRAMES (Woodrow Hill).
+
 
 =item v0.91, Saturday, February 10, 2001
 
@@ -1419,6 +1432,7 @@ Luke Drumm E<lt>lukedrumm@mypad.comE<gt>,
 Kyle Farrell E<lt>kyle@cantametrix.comE<gt>,
 Brian Goodwin E<lt>brian@fuddmain.comE<gt>,
 Todd Hanneken E<lt>thanneken@hds.harvard.eduE<gt>,
+Woodrow Hill E<lt>asim@mindspring.comE<gt>,
 Kee Hinckley E<lt>nazgul@somewhere.comE<gt>,
 Roman Hodek E<lt>Roman.Hodek@informatik.uni-erlangen.deE<gt>,
 Peter Kovacs E<lt>kovacsp@egr.uri.eduE<gt>,
@@ -1449,7 +1463,7 @@ Meng Weng Wong E<lt>mengwong@pobox.comE<gt>.
 
 Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 
-Copyright (c) 1998-2001 Chris Nandor.  All rights reserved.  This program is
+Copyright (c) 1998-2002 Chris Nandor.  All rights reserved.  This program is
 free software; you can redistribute it and/or modify it under the terms
 of the Artistic License, distributed with Perl.
 
@@ -1496,6 +1510,6 @@ of the Artistic License, distributed with Perl.
 
 =head1 VERSION
 
-v0.91, Saturday, February 10, 2001
+v1.00, Tuesday, January 22, 2002
 
 =cut
