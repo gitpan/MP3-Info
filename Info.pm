@@ -24,9 +24,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.16 2004/12/31 07:31:27 pudge Exp $
-($REVISION) = ' $Revision: 1.16 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.10';
+# $Id: Info.pm,v 1.17 2005/01/15 02:19:39 pudge Exp $
+($REVISION) = ' $Revision: 1.17 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '1.11';
 
 =pod
 
@@ -564,7 +564,16 @@ sub get_mp3tag {
 							if ($encoding eq "\001" || $encoding eq "\002") {  # UTF-16, UTF-16BE
 								# text fields can be null-separated lists;
 								# UTF-16 therefore needs special care
-								$data = join "\000", map { Encode::decode('utf16', $_) } split /\000\000/, $data;
+								#
+								# foobar2000 encodes tags in UTF-16LE
+								# (which is apparently illegal)
+								# Encode dies on a bad BOM, so it is
+								# probably wise to wrap it in an eval
+								# anyway
+								$data = join "\000", map {
+									eval { Encode::decode('utf16', $_) } || Encode::decode('utf16le', $_)
+								} split /\000\000/, $data;
+
 							} elsif ($encoding eq "\003") { # UTF-8
 								# make sure string is UTF8, and set flag appropriately
 								$data = Encode::decode('utf8', $data);
@@ -1640,7 +1649,7 @@ Meng Weng Wong.
 
 Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 
-Copyright (c) 1998-2004 Chris Nandor.  All rights reserved.  This program
+Copyright (c) 1998-2005 Chris Nandor.  All rights reserved.  This program
 is free software; you can redistribute it and/or modify it under the same
 terms as Perl itself.
 

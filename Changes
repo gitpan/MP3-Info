@@ -1,4 +1,8 @@
-* v1.10, day, December 27, 2004
+* v1.11, Friday, January 14, 2005
+
+   Fix for ID3v2 tags that happen to be UTF-16LE.  (Dan Sully)
+
+* v1.10, Thursday, December 30, 2004
 
    Make utf8 enabled by default (if available).
 
