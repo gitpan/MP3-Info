@@ -1,7 +1,8 @@
 This is MP3::Info, for getting info out of and into MP3 files.
 
-This release has two small bugfixes, one for better rendering of ID3v2
-data in get_mp3tag, and one for dealing with some possibly broken MP3s.
+This release has some more bugfixes for extracting ID3v2 tags,
+including fixes for ID3v2.2.0, basic support for ID3v2.4.0, and
+support for Unicode tags.  See the documentation for more information.
 
 A wrapper module is included so scripts calling MPEG::MP3Info (the
 old name) will still work.

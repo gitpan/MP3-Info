@@ -12,16 +12,20 @@ use vars qw(
 );
 
 @ISA = 'Exporter';
-@EXPORT = qw(set_mp3tag get_mp3tag get_mp3info remove_mp3tag use_winamp_genres);
-@EXPORT_OK = qw(@mp3_genres %mp3_genres);
+@EXPORT = qw(
+	set_mp3tag get_mp3tag get_mp3info remove_mp3tag
+	use_winamp_genres
+);
+@EXPORT_OK = qw(@mp3_genres %mp3_genres use_mp3_utf8);
 %EXPORT_TAGS = (
 	genres	=> [qw(@mp3_genres %mp3_genres)],
+	utf8	=> [qw(use_mp3_utf8)],
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.13 2002/01/23 04:36:43 pudge Exp $
-($REVISION) = ' $Revision: 1.13 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.00';
+# $Id: Info.pm,v 1.14 2002/02/27 03:59:32 pudge Exp $
+($REVISION) = ' $Revision: 1.14 $ ' =~ /\$Revision:\s+([^\s]+)/;
+$VERSION = '1.01';
 
 =pod
 
@@ -61,6 +65,7 @@ MP3::Info - Manipulate / fetch info from MP3 audio files
 =pod
 
 	my $mp3 = new MP3::Info $file;
+	$mp3->title('Perls Before Swine');
 	printf "$file length is %s, title is %s\n",
 		$mp3->time, $mp3->title;
 
@@ -111,9 +116,43 @@ sub DESTROY {
 
 }
 
+
 =head1 DESCRIPTION
 
 =over 4
+
+=item use_mp3_utf8([STATUS])
+
+Tells MP3::Info to (or not) return TAG info in UTF-8.
+TRUE is 1, FALSE is 0.  Default is FALSE.
+
+Will only be able to it on if Unicode::String is available.  ID3v2
+tags will be converted to UTF-8 according to the encoding specified
+in each tag; ID3v1 tags will be assumed Latin-1 and converted
+to UTF-8.
+
+Function returns status (TRUE/FALSE).  If no argument is supplied,
+or an unaccepted argument is supplied, function merely returns status.
+
+This function is not exported by default, but may be exported
+with the C<:utf8> export tag.
+
+=cut
+
+my $unicode_module = eval { require Unicode::String };
+my $UNICODE = 0;
+
+sub use_mp3_utf8 {
+	my $val = @_;
+	if ($val == 1) {
+		$UNICODE = 1 if $unicode_module;
+	} elsif ($val == 0) {
+		$UNICODE = 0;
+	}
+	return $UNICODE;
+}
+
+=pod
 
 =item use_winamp_genres()
 
@@ -233,7 +272,10 @@ returned by C<get_mp3tag>.
 If TRACKNUM is present (for ID3v1.1), then the COMMENT field can only be
 28 bytes.
 
-ID3v2 support may come eventually.
+ID3v2 support may come eventually.  Note that if you set a tag on a file
+with ID3v2, the set tag will be for ID3v1[.1] only, and if you call
+C<get_mp3_tag> on the file, it will show you the (unchanged) ID3v2 tags,
+unless you specify ID3v1.
 
 =cut
 
@@ -341,30 +383,39 @@ info as described in C<set_mp3tag>.
 
 If VERSION is C<1>, the information is taken from the ID3v1 tag (if present).
 If VERSION is C<2>, the information is taken from the ID3v2 tag (if present).
-If VERSION is not supplied, the ID3v1 tag is read if present, and then, if present,
-the ID3v2 tag information will override any existing ID3v1 tag info.
+If VERSION is not supplied, or is false, the ID3v1 tag is read if present, and
+then, if present, the ID3v2 tag information will override any existing ID3v1
+tag info.
 
-If the ID3v2 version is older than ID3v2.2.0, it will not be read (and
-a warning will be issued if B<-w> is on).
+If the ID3v2 version is older than ID3v2.2.0 or newer than ID3v2.3.0, it will
+not be read (and a warning will be issued if B<-w> is on).
 
 If RAW_V2 is false or not supplied and VERSION is C<2>, only the tags
 corresponding to ID3v1 tags are returned, with the same keys in the returned
 hashref.
 
 If RAW_V2 is true and VERSION is C<2>, C<get_mp3tag> will return a hash
-of tag four-character IDs and their data.  Tag IDs and their meanings
-are in the global hash (not exported) C<%v2_tag_names>.
+of tag four-character IDs and their data, without stripping text encoding and
+language code information.  Tag IDs and their meanings are in the global hash
+(not exported) C<%v2_tag_names>.
 
 	my $tag = get_mp3tag('mysong.mp3', 2, 1);   # ID3v2, raw ID3v2 tags
 	for (keys %$tag) {
 		printf "%s => %s\n", $MP3::Info::v2_tag_names{$_}, $tag->{$_};
 	}
 
+Strings returned will be in Latin-1, unless UTF-8 is specified
+(L<use_mp3_utf8>), unless RAW_V2 is specified, in which no
+charset manipulation is done.
+
+Also returns a VERSION key, containing the ID3 version used for the returned
+data (if VERSION argument is C<0>, may contain two versions).
+
 =cut
 
 sub get_mp3tag {
 	my($file, $ver, $raw_v2) = @_;
-	my($tag, $v1, $v2, %info, @array, $fh);
+	my($tag, $v1, $v2, $v2h, %info, @array, $fh);
 	$ver = !$ver ? 0 : ($ver == 2 || $ver == 1) ? $ver : 0;
 
 	carp('No file specified'), return undef unless defined $file && $file ne '';
@@ -390,10 +441,18 @@ sub get_mp3tag {
 					(unpack('a3a30a30a30a4a28', $tag),
 					ord(substr($tag, -2, 1)),
 					$mp3_genres[ord(substr $tag, -1)]);
+				$info{TAGVERSION} = 'ID3v1.1';
 			} else {
 				(undef, @info{@v1_tag_names[0..4, 6]}) =
 					(unpack('a3a30a30a30a4a30', $tag),
 					$mp3_genres[ord(substr $tag, -1)]);
+				$info{TAGVERSION} = 'ID3v1';
+			}
+			if ($UNICODE) {
+				for my $key (keys %info) {
+					my $u = Unicode::String::latin1($info{$key});
+					$info{$key} = $u->utf8;
+				}
 			}
 		} elsif ($ver == 1) {
 			_close($file, $fh);
@@ -401,35 +460,74 @@ sub get_mp3tag {
 		}
 	}
 
-	$v2 = _get_v2tag($fh);
+	($v2, $v2h) = _get_v2tag($fh);
 	unless ($v1 || $v2) {
 		_close($file, $fh);
 		return undef;
 	}
 
 	if (($ver == 0 || $ver == 2) && $v2) {
-		if ($raw_v2) {
+		if ($raw_v2 && $ver == 2) {
 			%info = %$v2;
+			$info{TAGVERSION} = $v2h->{version};
 		} else {
 			for (keys %v2_to_v1_names) {
 				if (exists $v2->{$_}) {
-					if ($_ eq 'TCON' && $v2->{$_} =~ /^\((\d+)\)/) {
+					if ($_ =~ /^TCON?$/ && $v2->{$_} =~ /^.?\((\d+)\)/) {
 						$info{$v2_to_v1_names{$_}} = $mp3_genres[$1];
 					} else {
 						my $data = $v2->{$_};
-						$data = $data->[0] if ref $data;
-						$data =~ s/^.*\000//; # strip up to last null
+
+						# this is tricky ... if this is an arrayref,
+						# we want to only return one, so we pick the
+						# first one.  but if it is a comment, we pick
+						# the first one where the first charcter after
+						# the language is NULL and not an additional
+						# sub-comment, because that is most likely to be
+						# the user-supplied comment
+						if (ref $data) {
+							if ($_ =~ /^COMM?$/) {
+								my($newdata) = grep /^(....\000)/, @{$data};
+								$data = $newdata || $data->[0];
+							} else {
+								$data = $data->[0];
+							}
+						}
+						$data =~ s/^(.)//; # strip first char (text encoding)
+						my $encoding = $1;
+						if ($_ =~ /^COMM?$/) {
+							$data =~ s/^(?:...)//;	# strip language
+							$data =~ s/^.*?\000+//;	# strip up to first NULL(s),
+										# for sub-comment
+						}
+						if ($UNICODE) {
+							if ($encoding eq "\001" || $encoding eq "\002") {  # UTF-16, UTF-16BE
+								my $u = Unicode::String::utf16($data);
+								$data = $u->utf8;
+								$data =~ s/^\xEF\xBB\xBF//;	# strip BOM
+							} elsif ($encoding eq "\000") {
+								my $u = Unicode::String::latin1($data);
+								$data = $u->utf8;
+							}
+						}
 						$info{$v2_to_v1_names{$_}} = $data;
 					}
 				}
 			}
+			if ($ver == 0 && $info{TAGVERSION}) {
+				$info{TAGVERSION} .= ' / ' . $v2h->{version};
+			} else {
+				$info{TAGVERSION} = $v2h->{version};
+			}
 		}
 	}
 
-	foreach my $key (keys %info) {
-		if (defined $info{$key}) {
-			$info{$key} =~ s/\s+$//;
-			$info{$key} =~ s/\000.*//g;
+	unless ($raw_v2 && $ver == 2) {
+		foreach my $key (keys %info) {
+			if (defined $info{$key}) {
+				$info{$key} =~ s/\000+.*//g;
+				$info{$key} =~ s/\s+$//;
+			}
 		}
 	}
 
@@ -492,7 +590,7 @@ sub _get_v2tag {
 		$off += $size;
 	}
 
-	return $h;
+	return($h, $v2);
 }
 
 
@@ -1139,9 +1237,31 @@ BEGIN {
 		'WPAY' => 'Payment',
 		'WPUB' => 'Publishers official webpage',
 		'WXXX' => 'User defined URL link frame',
+
+		# v2.4 additional tags
+		# note that we don't restrict tags from 2.3 or 2.4,
+		'ASPI' => 'Audio seek point index',
+		'EQU2' => 'Equalisation (2)',
+		'RVA2' => 'Relative volume adjustment (2)',
+		'SEEK' => 'Seek frame',
+		'SIGN' => 'Signature frame',
+		'TDEN' => 'Encoding time',
+		'TDOR' => 'Original release time',
+		'TDRC' => 'Recording time',
+		'TDRL' => 'Release time',
+		'TDTG' => 'Tagging time',
+		'TIPL' => 'Involved people list',
+		'TMCL' => 'Musician credits list',
+		'TMOO' => 'Mood',
+		'TPRO' => 'Produced notice',
+		'TSOA' => 'Album sort order',
+		'TSOP' => 'Performer sort order',
+		'TSOT' => 'Title sort order',
+		'TSST' => 'Set subtitle',
 	);
 }
 
+1;
 
 __END__
 
@@ -1206,6 +1326,24 @@ Right now, only Xing VBR is supported.
 =head1 HISTORY
 
 =over 4
+
+=item v1.01, Friday, February 26, 2002
+
+That was less reasonable than previously thought.  Just strip
+off text encoding bit, and then bytes for language and "up to first
+null" if COMM field (COMM fields can have an extra comment about the
+comment, which is terminated with a NULL, of course ...).
+Some encoders like to put in an extra NULL at the end; plus, it
+was doing the wrong thing for non-Latin-1 text.  (Ben Gertzfield)
+
+Also make it work better with ID3v2.2 tags, and make a more reasonable
+guess at which comment to use if there's more than one.
+
+Add some support for ID3v2.4.0 and Unicode strings in tags;
+see C<use_mp3_utf8>. (Ben Gertzfield)
+
+Add TAGVERSION to get_mp3tag result.
+
 
 =item v1.00, Tuesday, January 22, 2002
 
@@ -1430,6 +1568,7 @@ Sergio Camarena E<lt>scamarena@users.sourceforge.netE<gt>,
 Chris Dawson E<lt>cdawson@webiphany.comE<gt>,
 Luke Drumm E<lt>lukedrumm@mypad.comE<gt>,
 Kyle Farrell E<lt>kyle@cantametrix.comE<gt>,
+Ben Gertzfield E<lt>che@debian.orgE<gt>,
 Brian Goodwin E<lt>brian@fuddmain.comE<gt>,
 Todd Hanneken E<lt>thanneken@hds.harvard.eduE<gt>,
 Woodrow Hill E<lt>asim@mindspring.comE<gt>,
@@ -1510,6 +1649,6 @@ of the Artistic License, distributed with Perl.
 
 =head1 VERSION
 
-v1.00, Tuesday, January 22, 2002
+v1.01, Tuesday, February 26, 2002
 
 =cut
