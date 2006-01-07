@@ -1,5 +1,7 @@
 package MP3::Info;
+
 require 5.006;
+
 use overload;
 use strict;
 use Carp;
@@ -9,7 +11,7 @@ use vars qw(
 	@mp3_genres %mp3_genres @winamp_genres %winamp_genres $try_harder
 	@t_bitrate @t_sampling_freq @frequency_tbl %v1_tag_fields
 	@v1_tag_names %v2_tag_names %v2_to_v1_names $AUTOLOAD
-	@mp3_info_fields
+	@mp3_info_fields %rva2_channel_types
 );
 
 @ISA = 'Exporter';
@@ -24,9 +26,9 @@ use vars qw(
 	all	=> [@EXPORT, @EXPORT_OK]
 );
 
-# $Id: Info.pm,v 1.19 2005/03/11 04:41:29 pudge Exp $
+# $Id$
 ($REVISION) = ' $Revision: 1.19 $ ' =~ /\$Revision:\s+([^\s]+)/;
-$VERSION = '1.13';
+$VERSION = '1.20';
 
 =pod
 
@@ -455,8 +457,15 @@ data (if TAGVERSION argument is C<0>, may contain two versions).
 =cut
 
 sub get_mp3tag {
-	my($file, $ver, $raw_v2) = @_;
-	my($tag, $v1, $v2, $v2h, %info, @array, $fh);
+	my ($file, $ver, $raw_v2, $find_ape) = @_;
+	my ($tag, $v2h, $fh);
+
+	my $v1    = {};
+	my $v2    = {};
+	my $ape   = {};
+	my %info  = ();
+	my @array = ();
+
 	$raw_v2 ||= 0;
 	$ver = !$ver ? 0 : ($ver == 2 || $ver == 1) ? $ver : 0;
 
@@ -465,7 +474,9 @@ sub get_mp3tag {
 		return undef;
 	}
 
-	if (not -s $file) {
+	my $filesize = -s $file;
+
+	if (!$filesize) {
 		$@ = "File is empty";
 		return undef;
 	}
@@ -481,176 +492,50 @@ sub get_mp3tag {
 
 	binmode $fh;
 
-	if ($ver < 2) {
-		seek $fh, -128, 2;
-		while(defined(my $line = <$fh>)) { $tag .= $line }
+	# Try and find an APE Tag - this is where FooBar2k & others
+	# store ReplayGain information
+	if ($find_ape) {
 
-		if ($tag && $tag =~ /^TAG/) {
-			$v1 = 1;
-			if (substr($tag, -3, 2) =~ /\000[^\000]/) {
-				(undef, @info{@v1_tag_names}) =
-					(unpack('a3a30a30a30a4a28', $tag),
-					ord(substr($tag, -2, 1)),
-					$mp3_genres[ord(substr $tag, -1)]);
-				$info{TAGVERSION} = 'ID3v1.1';
-			} else {
-				(undef, @info{@v1_tag_names[0..4, 6]}) =
-					(unpack('a3a30a30a30a4a30', $tag),
-					$mp3_genres[ord(substr $tag, -1)]);
-				$info{TAGVERSION} = 'ID3v1';
-			}
-			if ($UNICODE) {
-				for my $key (keys %info) {
-					next unless $info{$key};
-					$info{$key} = Encode::encode_utf8($info{$key});
-				}
-			}
-		} elsif ($ver == 1) {
+		$ape = _parse_ape_tag($fh, $filesize, \%info);
+	}
+
+	if ($ver < 2) {
+
+		$v1 = _get_v1tag($fh, \%info);
+
+		if ($ver == 1 && !$v1) {
 			_close($file, $fh);
 			$@ = "No ID3v1 tag found";
 			return undef;
 		}
 	}
 
-	($v2, $v2h) = _get_v2tag($fh);
+	if ($ver == 2 || $ver == 0) {
+		($v2, $v2h) = _get_v2tag($fh);
+	}
 
-	unless ($v1 || $v2) {
+	if (!$v1 && !$v2 && !$ape) {
 		_close($file, $fh);
 		$@ = "No ID3 tag found";
 		return undef;
 	}
 
 	if (($ver == 0 || $ver == 2) && $v2) {
+
 		if ($raw_v2 == 1 && $ver == 2) {
+
 			%info = %$v2;
-			$info{TAGVERSION} = $v2h->{version};
+
+			$info{'TAGVERSION'} = $v2h->{'version'};
+
 		} else {
-			my $hash = $raw_v2 == 2 ? { map { ($_, $_) } keys %v2_tag_names } : \%v2_to_v1_names;
-			for my $id (keys %$hash) {
-				if (exists $v2->{$id}) {
-					my $data1 = $v2->{$id};
 
-					# this is tricky ... if this is an arrayref,
-					# we want to only return one, so we pick the
-					# first one.  but if it is a comment, we pick
-					# the first one where the first charcter after
-					# the language is NULL and not an additional
-					# sub-comment, because that is most likely to be
-					# the user-supplied comment
-					if (ref $data1 && !$raw_v2) {
-						if ($id =~ /^COMM?$/) {
-							my($newdata) = grep /^(....\000)/, @{$data1};
-							$data1 = $newdata || $data1->[0];
-						} else {
-							$data1 = $data1->[0];
-						}
-					}
+			_parse_v2tag($raw_v2, $v2, \%info);
 
-					$data1 = [ $data1 ] if ! ref $data1;
-
-					for my $data (@$data1) {
-						# TODO : this should only be done for certain frames;
-						# using RAW still gives you access, but we should be smarter
-						# about how individual frame types are handled.  it's not
-						# like the list is infinitely long.
-						$data =~ s/^(.)//; # strip first char (text encoding)
-						my $encoding = $1;
-						my $desc;
-						if ($id =~ /^COM[M ]?$/) { # space for iTunes brokenness
-							$data =~ s/^(?:...)//;		# strip language
-						}
-
-						if ($UNICODE) {
-							if ($encoding eq "\001" || $encoding eq "\002") {  # UTF-16, UTF-16BE
-								# text fields can be null-separated lists;
-								# UTF-16 therefore needs special care
-								#
-								# foobar2000 encodes tags in UTF-16LE
-								# (which is apparently illegal)
-								# Encode dies on a bad BOM, so it is
-								# probably wise to wrap it in an eval
-								# anyway
-								$data = eval { Encode::decode('utf16', $data) } || Encode::decode('utf16le', $data);
-								# this split we do doesn't work, because obviously
-								# two NULLs can appear where we don't want ...
-								#$data = join "\000", map {
-								#	eval { Encode::decode('utf16', $_) } || Encode::decode('utf16le', $_)
-								#} split /\000\000/, $data;
-
-							} elsif ($encoding eq "\003") { # UTF-8
-								# make sure string is UTF8, and set flag appropriately
-								$data = Encode::decode('utf8', $data);
-							} elsif ($encoding eq "\000") {
-								# Try and guess the encoding, otherwise just use latin1
-								my $dec = Encode::Guess->guess($data);
-								if (ref $dec) {
-									$data = $dec->decode($data);
-								} else {
-									# Best try
-									$data = Encode::decode('iso-8859-1', $data);
-								}
-							}
-
-							# do we care about trailing NULL?
-							# $data =~ s/\000$//;
-
-						} else {
-							# If the string starts with an
-							# UTF-16 little endian BOM, use a hack to
-							# convert to ASCII per best-effort
-							my $pat;
-							if ($data =~ s/^\xFF\xFE//) {
-								$pat = 'v';
-							} elsif ($data =~ s/^\xFE\xFF//) {
-								$pat = 'n';
-							}
-							if ($pat) {
-								$data = pack 'C*', map {
-									(chr =~ /[[:ascii:]]/ && chr =~ /[[:print:]]/)
-										? $_
-										: ord('?')
-								} unpack "$pat*", $data;
-							}
-						}
-
-						# We do this after decoding so we could be certain we're dealing
-						# with 8-bit text.
-						if ($id =~ /^COM[M ]?$/) { # space for iTunes brokenness
-							$data =~ s/^(.*?)\000//;	# strip up to first NULL(s),
-											# for sub-comments (TODO:
-											# handle all comment data)
-							$desc = $1;
-						} elsif ($id =~ /^TCON?$/) {
-							if ($data =~ /^ \(? (\d+) (?:\)|\000)? (.+)?/sx) {
-								my($index, $name) = ($1, $2);
-								if ($name && $name ne "\000") {
-									$data = $name;
-								} else {
-									$data = $mp3_genres[$index];
-								}
-							}
-						}
-
-						if ($raw_v2 == 2 && $desc) {
-							$data = { $desc => $data };
-						}
-
-						if ($raw_v2 == 2 && exists $info{$hash->{$id}}) {
-							if (ref $info{$hash->{$id}} eq 'ARRAY') {
-								push @{$info{$hash->{$id}}}, $data;
-							} else {
-								$info{$hash->{$id}} = [ $info{$hash->{$id}}, $data ];
-							}
-						} else {
-							$info{$hash->{$id}} = $data;
-						}
-					}
-				}
-			}
-			if ($ver == 0 && $info{TAGVERSION}) {
-				$info{TAGVERSION} .= ' / ' . $v2h->{version};
+			if ($ver == 0 && $info{'TAGVERSION'}) {
+				$info{'TAGVERSION'} .= ' / ' . $v2h->{'version'};
 			} else {
-				$info{TAGVERSION} = $v2h->{version};
+				$info{'TAGVERSION'} = $v2h->{'version'};
 			}
 		}
 	}
@@ -668,13 +553,415 @@ sub get_mp3tag {
 		}
 	}
 
-	if (keys %info && exists $info{GENRE} && ! defined $info{GENRE}) {
-		$info{GENRE} = '';
+	if (keys %info && exists $info{'GENRE'} && ! defined $info{'GENRE'}) {
+		$info{'GENRE'} = '';
 	}
 
 	_close($file, $fh);
 
 	return keys %info ? {%info} : undef;
+}
+
+sub _get_v1tag {
+	my ($fh, $info) = @_;
+
+	seek $fh, -128, 2;
+	read($fh, my $tag, 128);
+
+	if (!defined($tag) || $tag !~ /^TAG/) {
+
+		return 0;
+	}
+
+	if (substr($tag, -3, 2) =~ /\000[^\000]/) {
+
+		(undef, @{$info}{@v1_tag_names}) =
+			(unpack('a3a30a30a30a4a28', $tag),
+			ord(substr($tag, -2, 1)),
+			$mp3_genres[ord(substr $tag, -1)]);
+
+		$info->{'TAGVERSION'} = 'ID3v1.1';
+
+	} else {
+
+		(undef, @{$info}{@v1_tag_names[0..4, 6]}) =
+			(unpack('a3a30a30a30a4a30', $tag),
+			$mp3_genres[ord(substr $tag, -1)]);
+
+		$info->{'TAGVERSION'} = 'ID3v1';
+	}
+
+	if ($UNICODE) {
+
+		# Save off the old suspects list, since we add
+		# iso-8859-1 below, but don't want that there
+		# for possible ID3 v2.x parsing below.
+		my $oldSuspects = $Encode::Encoding{'Guess'}->{'Suspects'};
+
+		for my $key (keys %{$info}) {
+
+			next unless $info->{$key};
+
+			# Try and guess the encoding.
+			my $value = $info->{$key};
+			my $icode = Encode::Guess->guess($value);
+
+			unless (ref($icode)) {
+
+				# Often Latin1 bytes are
+				# stuffed into a 1.1 tag.
+				Encode::Guess->add_suspects('iso-8859-1');
+
+				while (length($value)) {
+
+					$icode = Encode::Guess->guess($value);
+
+					last if ref($icode);
+
+					# Remove garbage and retry
+					# (string is truncated in the
+					# middle of a multibyte char?)
+					$value =~ s/(.)$//;
+				}
+			}
+
+			$info->{$key} = Encode::decode(ref($icode) ? $icode->name : 'iso-8859-1', $info->{$key});
+		}
+
+		Encode::Guess->set_suspects(keys %{$oldSuspects});
+	}
+
+	return 1;
+}
+
+sub _parse_v2tag {
+	my ($raw_v2, $v2, $info) = @_;
+
+	# Make sure any existing TXXX flags are an array.
+	# As we might need to append comments to it below.
+	if ($v2->{'TXXX'} && ref($v2->{'TXXX'}) ne 'ARRAY') {
+
+		$v2->{'TXXX'} = [ $v2->{'TXXX'} ];
+	}
+
+	# J.River Media Center sticks RG tags in comments.
+	# Ugh. Make them look like TXXX tags, which is really what they are.
+	if (ref($v2->{'COMM'}) eq 'ARRAY' && grep { /Media Jukebox/ } @{$v2->{'COMM'}}) {
+
+		for my $comment (@{$v2->{'COMM'}}) {
+
+			if ($comment =~ /Media Jukebox/) {
+
+				# we only want one null to lead.
+				$comment =~ s/^\000+//g;
+
+				push @{$v2->{'TXXX'}}, "\000$comment";
+			}
+		}
+	}
+
+	my $hash = $raw_v2 == 2 ? { map { ($_, $_) } keys %v2_tag_names } : \%v2_to_v1_names;
+
+	for my $id (keys %$hash) {
+
+		next if !exists $v2->{$id};
+
+		if ($id =~ /^UFID?$/) {
+
+			my @ufid_list = split(/\0/, $v2->{$id});
+
+			$info->{$hash->{$id}} = $ufid_list[1] if ($#ufid_list > 0);
+
+		} elsif ($id =~ /^RVA[D2]?$/) {
+
+			# Expand these binary fields. See the ID3 spec for Relative Volume Adjustment.
+			if ($id eq 'RVA2') {
+
+				# ID is a text string
+				($info->{$hash->{$id}}->{'ID'}, my $rvad) = split /\0/, $v2->{$id};
+
+				my $channel = $rva2_channel_types{ ord(substr($rvad, 0, 1, '')) };
+
+				$info->{$hash->{$id}}->{$channel}->{'REPLAYGAIN_TRACK_GAIN'} = 
+					sprintf('%f', _grab_int_16(\$rvad) / 512);
+
+				my $peakBytes = ord(substr($rvad, 0, 1, ''));
+
+				if (int($peakBytes / 8)) {
+
+					$info->{$hash->{$id}}->{$channel}->{'REPLAYGAIN_TRACK_PEAK'} = 
+						sprintf('%f', _grab_int_16(\$rvad) / 512);
+				}
+
+			} elsif ($id eq 'RVAD' || $id eq 'RVA') {
+
+				my $rvad  = $v2->{$id};
+				my $flags = ord(substr($rvad, 0, 1, ''));
+				my $desc  = ord(substr($rvad, 0, 1, ''));
+
+				# iTunes appears to be the only program that actually writes
+				# out a RVA/RVAD tag. Everyone else punts.
+				for my $type (qw(REPLAYGAIN_TRACK_GAIN REPLAYGAIN_TRACK_PEAK)) {
+
+					for my $channel (qw(RIGHT LEFT)) {
+
+						my $val = _grab_uint_16(\$rvad) / 256;
+
+						# iTunes uses a range of -255 to 255
+						# to be -100% (silent) to 100% (+6dB)
+						if ($val == -255) {
+							$val = -96.0;
+						} else {
+							$val = 20.0 * log(($val+255)/255)/log(10);
+						}
+
+						$info->{$hash->{$id}}->{$channel}->{$type} = $flags & 0x01 ? $val : -$val;
+					}
+				}
+			}
+
+		} elsif ($id =~ /^A?PIC$/) {
+
+			my $pic = $v2->{$id};
+
+			# if there is more than one picture, just grab the first one.
+			if (ref($pic) eq 'ARRAY') {
+				$pic = (@$pic)[0];
+			}
+
+			use bytes;
+
+			my $valid_pic  = 0;
+			my $pic_len    = 0;
+			my $pic_format = '';
+
+			# look for ID3 v2.2 picture
+			if ($pic && $id eq 'PIC') {
+
+				# look for ID3 v2.2 picture
+				my ($encoding, $format, $picture_type, $description) = unpack 'Ca3CZ*', $pic;
+				$pic_len = length($description) + 1 + 5;
+
+				# skip extra terminating null if unicode
+				if ($encoding) { $pic_len++; }
+
+				if ($pic_len < length($pic)) {
+					$valid_pic  = 1;
+					$pic_format = $format;
+				}
+
+			} elsif ($pic && $id eq 'APIC') {
+
+				# look for ID3 v2.3 picture
+				my ($encoding, $format) = unpack 'C Z*', $pic;
+
+				$pic_len = length($format) + 2;
+
+				if ($pic_len < length($pic)) {
+
+					my ($picture_type, $description) = unpack "x$pic_len C Z*", $pic;
+
+					$pic_len += 1 + length($description) + 1;
+
+					# skip extra terminating null if unicode
+					if ($encoding) { $pic_len++; }
+
+					$valid_pic  = 1;
+					$pic_format = $format;
+				}
+			}
+
+			# Proceed if we have a valid picture.
+			if ($valid_pic && $pic_format) {
+
+				my ($data) = unpack("x$pic_len A*", $pic);
+
+				if (length($data) && $pic_format) {
+
+					$info->{$hash->{$id}} = {
+						'DATA'   => $data,
+						'FORMAT' => $pic_format,
+					}
+				}
+			}
+
+		} else {
+			my $data1 = $v2->{$id};
+
+			# this is tricky ... if this is an arrayref,
+			# we want to only return one, so we pick the
+			# first one.  but if it is a comment, we pick
+			# the first one where the first charcter after
+			# the language is NULL and not an additional
+			# sub-comment, because that is most likely to be
+			# the user-supplied comment
+			if (ref $data1 && !$raw_v2) {
+				if ($id =~ /^COMM?$/) {
+					my($newdata) = grep /^(....\000)/, @{$data1};
+					$data1 = $newdata || $data1->[0];
+				} elsif ($id !~ /^(?:TXXX?|PRIV)$/) {
+					# We can get multiple User Defined Text frames in a mp3 file
+					$data1 = $data1->[0];
+				}
+			}
+
+			$data1 = [ $data1 ] if ! ref $data1;
+
+			for my $data (@$data1) {
+				# TODO : this should only be done for certain frames;
+				# using RAW still gives you access, but we should be smarter
+				# about how individual frame types are handled.  it's not
+				# like the list is infinitely long.
+				$data =~ s/^(.)//; # strip first char (text encoding)
+				my $encoding = $1;
+				my $desc;
+
+				# Comments & Unsyncronized Lyrics have the same format.
+				if ($id =~ /^(COM[M ]?|USLT)$/) { # space for iTunes brokenness
+
+					$data =~ s/^(?:...)//;		# strip language
+				}
+
+				if ($UNICODE) {
+
+					if ($encoding eq "\001" || $encoding eq "\002") {  # UTF-16, UTF-16BE
+						# text fields can be null-separated lists;
+						# UTF-16 therefore needs special care
+						#
+						# foobar2000 encodes tags in UTF-16LE
+						# (which is apparently illegal)
+						# Encode dies on a bad BOM, so it is
+						# probably wise to wrap it in an eval
+						# anyway
+						$data = eval { Encode::decode('utf16', $data) } || Encode::decode('utf16le', $data);
+
+					} elsif ($encoding eq "\003") { # UTF-8
+
+						# make sure string is UTF8, and set flag appropriately
+						$data = Encode::decode('utf8', $data);
+
+					} elsif ($encoding eq "\000") {
+
+						# Only guess if it's not ascii.
+						if ($data && $data !~ /^[\x00-\x7F]+$/) {
+
+							# Try and guess the encoding, otherwise just use latin1
+							my $dec = Encode::Guess->guess($data);
+
+							if (ref $dec) {
+								$data = $dec->decode($data);
+							} else {
+								# Best try
+								$data = Encode::decode('iso-8859-1', $data);
+							}
+						}
+					}
+
+				} else {
+
+					# If the string starts with an
+					# UTF-16 little endian BOM, use a hack to
+					# convert to ASCII per best-effort
+					my $pat;
+					if ($data =~ s/^\xFF\xFE//) {
+						$pat = 'v';
+					} elsif ($data =~ s/^\xFE\xFF//) {
+						$pat = 'n';
+					}
+
+					if ($pat) {
+						$data = pack 'C*', map {
+							(chr =~ /[[:ascii:]]/ && chr =~ /[[:print:]]/)
+								? $_
+								: ord('?')
+						} unpack "$pat*", $data;
+					}
+				}
+
+				# We do this after decoding so we could be certain we're dealing
+				# with 8-bit text.
+				if ($id =~ /^(COM[M ]?|USLT)$/) { # space for iTunes brokenness
+
+					$data =~ s/^(.*?)\000//;	# strip up to first NULL(s),
+									# for sub-comments (TODO:
+									# handle all comment data)
+					$desc = $1;
+
+				} elsif ($id =~ /^TCON?$/) {
+
+					my ($index, $name);
+
+					# Turn multiple nulls into a single.
+					$data =~ s/\000+/\000/g;
+
+					# Handle the ID3v2.x spec - 
+					#
+					# just an index number, possibly
+					# paren enclosed - referer to the v1 genres.
+					if ($data =~ /^ \(? (\d+) \)?\000?$/sx) {
+
+						$index = $1;
+
+					# Paren enclosed index with refinement.
+					# (4)Eurodisco
+					} elsif ($data =~ /^ \( (\d+) \)\000? ([^\(].+)$/x) {
+
+						($index, $name) = ($1, $2);
+
+					# List of indexes: (37)(38)
+					} elsif ($data =~ /^ \( (\d+) \)\000?/x) {
+
+						my @genres = ();
+
+						while ($data =~ s/^ \( (\d+) \)\000?//x) {
+
+							push @genres, $mp3_genres[$1];
+						}
+
+						$data = \@genres;
+					}
+
+					# Text based genres will fall through.
+					if ($name && $name ne "\000") {
+						$data = $name;
+					} elsif (defined $index) {
+						$data = $mp3_genres[$index];
+					}
+				}
+
+				if ($raw_v2 == 2 && $desc) {
+					$data = { $desc => $data };
+				}
+
+				if ($raw_v2 == 2 && exists $info->{$hash->{$id}}) {
+
+					if (ref $info->{$hash->{$id}} eq 'ARRAY') {
+						push @{$info->{$hash->{$id}}}, $data;
+					} else {
+						$info->{$hash->{$id}} = [ $info->{$hash->{$id}}, $data ];
+					}
+
+				} else {
+
+					# User defined frame
+					if ($id eq 'TXXX') {
+
+						my ($key, $val) = split(/\0/, $data);
+						$info->{uc($key)} = $val;
+
+					} elsif ($id eq 'PRIV') {
+
+						my ($key, $val) = split(/\0/, $data);
+						$info->{uc($key)} = unpack('v', $val);
+
+					} else {
+
+						$info->{$hash->{$id}} = $data;
+					}
+				}
+			}
+		}
+	}
 }
 
 sub _get_v2tag {
@@ -692,7 +979,12 @@ sub _get_v2tag {
 	}
 
 	# use syncsafe bytes if using version 2.4
-	my $bytesize = ($v2h->{major_version} > 3) ? 128 : 256;
+	# my $bytesize = ($v2h->{major_version} > 3) ? 128 : 256;
+
+	# alas, that's what the spec says, but iTunes and others don't syncsafe
+	# the length, which breaks MP3 files with v2.4 tags longer than 128 bytes,
+	# like every image file.
+	my $bytesize = 256;
 
 	if ($v2h->{major_version} == 2) {
 		$hlen = 6;
@@ -831,6 +1123,11 @@ sub get_mp3info {
 	$off = 0;
 	$tot = 8192;
 
+	# Let the caller change how far we seek in looking for a header.
+	if ($try_harder) {
+		$tot *= $try_harder;
+	}
+
 	binmode $fh;
 	seek $fh, $off, 0;
 	read $fh, $byte, 4;
@@ -845,19 +1142,40 @@ sub get_mp3info {
 
 	$h = _get_head($byte);
 	my $is_mp3 = _is_mp3($h); 
-	until ($is_mp3) {
+
+	# the head wasn't where we were expecting it.. dig deeper.
+	unless ($is_mp3) {
+
+		# do only one read - it's _much_ faster
 		$off++;
 		seek $fh, $off, 0;
-		read $fh, $byte, 4;
+		read $fh, $byte, $tot;
+		 
+		my $i;
+		 
+		# now walk the bytes looking for the head
+		for ($i = 0; $i < $tot; $i++) {
+
+			last if ($tot - $i) < 4;
+		 
+			my $head = substr($byte, $i, 4) || last;
+			 
+			next if (ord($head) != 0xff);
+			 
+			$h = _get_head($head);
+			$is_mp3 = _is_mp3($h);
+			last if $is_mp3;
+		}
+		 
+		# adjust where we are for _get_vbr()
+		$off += $i;
+
 		if ($off > $tot && !$try_harder) {
 			_close($file, $fh);
 			$@ = "Couldn't find MP3 header (perhaps set " .
 			     '$MP3::Info::try_harder and retry)';
 			return undef;
 		}
-		next if ord($byte) != 0xFF;
-		$h = _get_head($byte);
-		$is_mp3 = _is_mp3($h);
 	}
 
 	my $vbr = _get_vbr($fh, $h, \$off);
@@ -878,6 +1196,11 @@ sub get_mp3info {
 sub _get_info {
 	my($h, $vbr) = @_;
 	my $i;
+
+	# No bitrate or sample rate? Something's wrong.
+	unless ($h->{bitrate} && $h->{fs}) {
+		return {};
+	}
 
 	$i->{VERSION}	= $h->{IDR} == 2 ? 2 : $h->{IDR} == 3 ? 1 :
 				$h->{IDR} == 0 ? 2.5 : 0;
@@ -971,24 +1294,30 @@ sub _is_mp3 {
 		($h->{bytes} & 0xFFFF0000) == 0xFFFE0000
 			||
 		($h->{ID} == 1 && $h->{layer} == 3 && $h->{protection_bit} == 1)
-			||
-		($h->{mode_extension} != 0 && $h->{mode} != 1)
+		# mode extension should only be applicable when mode = 1
+		# however, failing just becuase mode extension is used when unneeded is a bit strict
+		#	||
+		#($h->{mode_extension} != 0 && $h->{mode} != 1)
 	);
+}
+
+sub _vbr_seek {
+	my $fh    = shift;
+	my $off   = shift;
+	my $bytes = shift;
+	my $n     = shift || 4;
+
+	seek $fh, $$off, 0;
+	read $fh, $$bytes, $n;
+
+	$$off += $n;
 }
 
 sub _get_vbr {
 	my($fh, $h, $roff) = @_;
-	my($off, $bytes, @bytes, $myseek, %vbr);
+	my($off, $bytes, @bytes, %vbr);
 
 	$off = $$roff;
-	@_ = ();	# closure confused if we don't do this
-
-	$myseek = sub {
-		my $n = $_[0] || 4;
-		seek $fh, $off, 0;
-		read $fh, $bytes, $n;
-		$off += $n;
-	};
 
 	$off += 4;
 
@@ -998,30 +1327,30 @@ sub _get_vbr {
 		$off += $h->{mode} == 3 ? 9 : 17;
 	}
 
-	&$myseek;
+	_vbr_seek($fh, \$off, \$bytes);
 	return unless $bytes eq 'Xing';
 
-	&$myseek;
+	_vbr_seek($fh, \$off, \$bytes);
 	$vbr{flags} = _unpack_head($bytes);
 
 	if ($vbr{flags} & 1) {
-		&$myseek;
+		_vbr_seek($fh, \$off, \$bytes);
 		$vbr{frames} = _unpack_head($bytes);
 	}
 
 	if ($vbr{flags} & 2) {
-		&$myseek;
+		_vbr_seek($fh, \$off, \$bytes);
 		$vbr{bytes} = _unpack_head($bytes);
 	}
 
 	if ($vbr{flags} & 4) {
-		$myseek->(100);
+		_vbr_seek($fh, \$off, \$bytes, 100);
 # Not used right now ...
 #		$vbr{toc} = _unpack_head($bytes);
 	}
 
 	if ($vbr{flags} & 8) { # (quality ind., 0=best 100=worst)
-		&$myseek;
+		_vbr_seek($fh, \$off, \$bytes);
 		$vbr{scale} = _unpack_head($bytes);
 	} else {
 		$vbr{scale} = -1;
@@ -1123,6 +1452,134 @@ sub _find_id3_chunk {
 
 sub _unpack_head {
 	unpack('l', pack('L', unpack('N', $_[0])));
+}
+
+sub _grab_int_16 {
+        my $data  = shift;
+        my $value = unpack('s',substr($$data,0,2));
+        $$data    = substr($$data,2);
+        return $value;
+}
+
+sub _grab_uint_16 {
+        my $data  = shift;
+        my $value = unpack('S',substr($$data,0,2));
+        $$data    = substr($$data,2);
+        return $value;
+}
+
+sub _grab_int_32 {
+        my $data  = shift;
+        my $value = unpack('V',substr($$data,0,4));
+        $$data    = substr($$data,4);
+        return $value;
+}
+
+sub _parse_ape_tag {
+	my ($fh, $filesize, $info) = @_;
+
+	my $ape_tag_id = 'APETAGEX';
+
+	seek $fh, -256, 2;
+	read($fh, my $tag, 256);
+	my $pre_tag = substr($tag, 0, 128, '');
+
+	# Try and bail early if there's no ape tag.
+	if (substr($pre_tag, 96, 8) ne $ape_tag_id && substr($tag, 96, 8) ne $ape_tag_id) {
+
+		seek($fh, 0, 0);
+		return 0;
+	}
+
+	my $id3v1_tag_size      = 128;
+	my $ape_tag_header_size = 32;
+	my $lyrics3_tag_size    = 10;
+	my $tag_offset_start    = 0;
+	my $tag_offset_end      = 0;
+
+	seek($fh, (0 - $id3v1_tag_size - $ape_tag_header_size - $lyrics3_tag_size), 2);
+
+	read($fh, my $ape_footer_id3v1, $id3v1_tag_size + $ape_tag_header_size + $lyrics3_tag_size);
+
+	if (substr($ape_footer_id3v1, (length($ape_footer_id3v1) - $id3v1_tag_size - $ape_tag_header_size), 8) eq $ape_tag_id) {
+
+		$tag_offset_end = $filesize - $id3v1_tag_size;
+
+	} elsif (substr($ape_footer_id3v1, (length($ape_footer_id3v1) - $ape_tag_header_size), 8) eq $ape_tag_id) {
+
+		$tag_offset_end = $filesize;
+	}
+
+	seek($fh, $tag_offset_end - $ape_tag_header_size, 0);
+
+	read($fh, my $ape_footer_data, 32);
+
+	my $ape_footer = _parse_ape_header_or_footer($ape_footer_data);
+
+	if (keys %{$ape_footer}) {
+
+		my $ape_tag_data = '';
+
+		if ($ape_footer->{'flags'}->{'header'}) {
+
+			seek($fh, ($tag_offset_end - $ape_footer->{'tag_size'} - $ape_tag_header_size), 0);
+
+			$tag_offset_start = tell($fh);
+
+			read($fh, $ape_tag_data, $ape_footer->{'tag_size'} + $ape_tag_header_size);
+
+		} else {
+
+			$tag_offset_start = $tag_offset_end - $ape_footer->{'tag_size'};
+
+			seek($fh, $tag_offset_start, 0);
+
+			read($fh, $ape_tag_data, $ape_footer->{'tag_size'});
+		}
+
+		my $ape_header_data = substr($ape_tag_data, 0, $ape_tag_header_size, '');
+		my $ape_header      = _parse_ape_header_or_footer($ape_header_data);
+
+		for (my $c = 0; $c < $ape_header->{'tag_items'}; $c++) {
+		
+			# Loop through the tag items
+			my $tag_len   = _grab_int_32(\$ape_tag_data);
+			my $tag_flags = _grab_int_32(\$ape_tag_data);
+
+			$ape_tag_data =~ s/^(.*?)\0//;
+
+			my $tag_item_key = uc($1 || 'UNKNOWN');
+
+			$info->{$tag_item_key} = substr($ape_tag_data, 0, $tag_len, '');
+		}
+	}
+
+	seek($fh, 0, 0);
+
+	return 1;
+}
+
+sub _parse_ape_header_or_footer {
+	my $bytes = shift;
+	my %data = ();
+
+	if (substr($bytes, 0, 8, '') eq 'APETAGEX') {
+
+		$data{'version'}      = _grab_int_32(\$bytes);
+		$data{'tag_size'}     = _grab_int_32(\$bytes);
+		$data{'tag_items'}    = _grab_int_32(\$bytes);
+		$data{'global_flags'} = _grab_int_32(\$bytes);
+
+		# trim the reseved bytes
+		_grab_int_32(\$bytes);
+		_grab_int_32(\$bytes);
+
+		$data{'flags'}->{'header'}    = ($data{'global_flags'} & 0x80000000) ? 1 : 0;
+		$data{'flags'}->{'footer'}    = ($data{'global_flags'} & 0x40000000) ? 1 : 0;
+		$data{'flags'}->{'is_header'} = ($data{'global_flags'} & 0x20000000) ? 1 : 0;
+	}
+
+	return \%data;
 }
 
 sub _close {
@@ -1330,6 +1787,18 @@ BEGIN {
 		VBR_SCALE
 	);
 
+	%rva2_channel_types = (
+		0x00 => 'OTHER',
+		0x01 => 'MASTER',
+		0x02 => 'FRONT_RIGHT',
+		0x03 => 'FRONT_LEFT',
+		0x04 => 'BACK_RIGHT',
+		0x05 => 'BACK_LEFT',
+		0x06 => 'FRONT_CENTER',
+		0x07 => 'BACK_CENTER',
+		0x08 => 'SUBWOOFER',
+	);
+
 	%v1_tag_fields =
 		(TITLE => 30, ARTIST => 30, ALBUM => 30, COMMENT => 30, YEAR => 4);
 
@@ -1352,6 +1821,9 @@ BEGIN {
 		'COMM' => 'COMMENT',
 		'TRCK' => 'TRACKNUM',
 		'TCON' => 'GENRE',
+		# v2.3 tags - needed for MusicBrainz
+		'UFID' => 'Unique file identifier',
+		'TXXX' => 'User defined text information frame',
 	);
 
 	%v2_tag_names = (
@@ -1652,22 +2124,30 @@ Ben Winslow,
 Meng Weng Wong.
 
 
-=head1 AUTHOR AND COPYRIGHT
+=head1 CURRENT AUTHOR 
+
+Dan Sully E<lt>dan | at | slimdevices.comE<gt> & Slim Devices, Inc.
+
+=head1 AUTHOR EMERITUS
 
 Chris Nandor E<lt>pudge@pobox.comE<gt>, http://pudge.net/
 
-Copyright (c) 1998-2005 Chris Nandor.  All rights reserved.  This program
-is free software; you can redistribute it and/or modify it under the same
-terms as Perl itself.
+=head1 COPYRIGHT AND LICENSE 
 
+Copyright (c) 2006 Dan Sully & Slim Devices, Inc. All rights reserved. 
+
+Copyright (c) 1998-2005 Chris Nandor. All rights reserved. 
+
+This program is free software; you can redistribute it and/or modify it under
+the same terms as Perl itself.
 
 =head1 SEE ALSO
 
 =over 4
 
-=item MP3::Info Project Page
+=item Slim Devices
 
-	http://projects.pudge.net/
+	http://www.slimdevices.com/
 
 =item mp3tools
 

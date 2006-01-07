@@ -4,9 +4,9 @@ Makefile.PL
 MANIFEST
 MANIFEST.SKIP
 README
+TODO
 eg/mp3tag.PL
 eg/mp3tocddb.PL
-lib/MPEG/MP3Info.pm
 t/getset.t
 t/id3.t
 t/lame-info.t

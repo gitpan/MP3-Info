@@ -1,22 +1,22 @@
 This is MP3::Info, for getting info out of and into MP3 files.
 
-A wrapper module is included so scripts calling MPEG::MP3Info (the
-old name) will still work.
-
 This archive can always be obtained from:
 
-    http://sf.net/projects/pudge/
-    http://www.cpan.org/authors/id/CNANDOR/
+    http://www.cpan.org/authors/id/DANIEL/
     http://www.cpan.org/modules/by-module/MP3/
 
 The project homepage is:
 
-    http://projects.pudge.net/
+    http://www.slimdevices.com/
 
 Please let me know how well it does(n't) work, and any changes you'd 
-like to see.   Thanks to all of the people who have sent me feedback
-and ideas.
+like to see. 
 
-Copyright (c) 1998-2005 Chris Nandor.  All rights reserved.  This program
-is free software; you can redistribute it and/or modify it under the same
-terms as Perl itself.
+Thanks to all of the people who have sent me feedback and ideas.
+
+Copyright (c) 2006 Dan Sully & Slim Devices, Inc.
+
+Copyright (c) 1998-2005 Chris Nandor.
+
+All rights reserved. This program is free software; you can redistribute it
+and/or modify it under the same terms as Perl itself.
