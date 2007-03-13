@@ -1,13 +1,13 @@
-# $Id: Makefile.PL 10 1998-12-16 23:02:45Z daniel $
+use ExtUtils::MakeMaker;
 
-use inc::Module::Install;
-
-name('MP3-Info');
-license('perl');
-perl_version('5.004');
-all_from('Info.pm');
-
-build_depends('Test::More');
-
-auto_install();
-WriteAll();
+WriteMakefile(
+	'NAME'			=> 'MP3::Info',
+	'VERSION_FROM'		=> 'lib/MP3/Info.pm',
+	'PREREQ_PM'	=> {
+    		'Test::More'	=> 0,
+	},
+	'clean'		=> {
+		'FILES'		=> 'MP3-Info-*'
+	},
+	'NO_META'		=> 1,
+);
